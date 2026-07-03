@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { listRuns, type RunSummary } from '@/lib/api'
 import ThemeToggle from '@/components/ThemeToggle'
+import UsageSummary from '@/components/UsageSummary'
 
 /**
  * ChatGPT-style collapsible left sidebar (Phase 3) — the primary navigation.
@@ -215,6 +216,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         >
           View all history
         </Link>
+        <UsageSummary refreshKey={pathname} />
         <ThemeToggle />
       </div>
     </aside>

@@ -10,11 +10,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api._common import api_error, ok
 from db.models import Dataset, Run
 from db.session import get_session
+
+# Recent-runs breakdown shown alongside the sidebar's usage totals (Phase 4:
+# token/cost utilization). Kept small — this is a glanceable widget, not the
+# full History screen.
+USAGE_RECENT_LIMIT = 20
 
 
 def _parse_iso(value: str, field: str) -> datetime:
@@ -155,4 +161,48 @@ def list_runs(
             }
             for r in runs
         ]
+    )
+
+
+@router.get("/usage")
+def get_usage_summary(session: Session = Depends(get_session)) -> dict:
+    """All-time token/cost utilization for the sidebar widget: running
+    totals across every run, plus a compact recent-runs breakdown. A
+    top-level path (not nested under /runs/{run_id}) so it can never be
+    shadowed by the run-detail path param.
+    """
+    totals = session.query(
+        func.coalesce(func.sum(Run.token_input_count), 0),
+        func.coalesce(func.sum(Run.token_output_count), 0),
+        func.coalesce(func.sum(Run.estimated_cost_usd), 0.0),
+        func.count(Run.id),
+    ).one()
+    total_input_tokens, total_output_tokens, total_cost_usd, run_count = totals
+
+    recent = (
+        session.query(Run)
+        .filter(Run.status.in_(("completed", "failed")))
+        .order_by(Run.created_at.desc())
+        .limit(USAGE_RECENT_LIMIT)
+        .all()
+    )
+
+    return ok(
+        {
+            "total_input_tokens": int(total_input_tokens),
+            "total_output_tokens": int(total_output_tokens),
+            "total_cost_usd": float(total_cost_usd),
+            "run_count": int(run_count),
+            "runs": [
+                {
+                    "run_id": r.id,
+                    "question_text": r.question_text,
+                    "token_input_count": r.token_input_count or 0,
+                    "token_output_count": r.token_output_count or 0,
+                    "estimated_cost_usd": float(r.estimated_cost_usd) if r.estimated_cost_usd is not None else 0.0,
+                    "created_at": r.created_at.isoformat(),
+                }
+                for r in recent
+            ],
+        }
     )

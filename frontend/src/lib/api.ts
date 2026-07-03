@@ -216,3 +216,26 @@ export async function listRuns(
   if (filters.date_to) params.set('date_to', filters.date_to)
   return request<RunSummary[]>(`/runs?${params.toString()}`)
 }
+
+export interface UsageRun {
+  run_id: string
+  question_text: string
+  token_input_count: number
+  token_output_count: number
+  estimated_cost_usd: number
+  created_at: string
+}
+
+export interface UsageSummary {
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cost_usd: number
+  run_count: number
+  runs: UsageRun[]
+}
+
+// GET /usage — all-time token/cost utilization totals + a recent-runs
+// breakdown, for the sidebar's usage widget.
+export async function getUsageSummary(): Promise<UsageSummary> {
+  return request<UsageSummary>('/usage')
+}
