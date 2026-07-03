@@ -1,2 +1,15 @@
 @import "tailwindcss";
 @source "../";
+
+/*
+ * Tailwind v4 has no JS config file; the class-based dark-mode strategy
+ * (equivalent to `darkMode: 'class'`) is declared here. Every `dark:` utility
+ * activates when a `.dark` class is present on an ancestor (we set it on
+ * <html>), matching the ChatGPT-style dark/light theme in Phase 3.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+html,
+body {
+  height: 100%;
+}

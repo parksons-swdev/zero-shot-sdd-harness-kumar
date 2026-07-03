@@ -1,0 +1,9 @@
+{
+  "name": "agent-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Root-level package.json solely to host the Playwright E2E harness for tests/e2e/. The application frontend lives in frontend/ with its own package.json.",
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}
