@@ -190,47 +190,65 @@ export default function Home() {
 
   if (dataset && showProfile) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-16">
-        <UploadProfileCard dataset={dataset} onContinue={handleContinue} />
+      <div className="h-full overflow-y-auto px-4 py-16">
+        <div className="mx-auto max-w-3xl">
+          <UploadProfileCard dataset={dataset} onContinue={handleContinue} />
+        </div>
       </div>
     )
   }
 
   if (!dataset) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-16">
-        <h1 className="mb-2 text-center text-2xl font-bold tracking-tight text-gray-900">CSV Insight Agent</h1>
-        <p className="mb-8 text-center text-sm text-gray-500">Upload a CSV to start asking questions about it.</p>
-        <UploadArea onParsed={handleParsed} />
+      <div className="h-full overflow-y-auto px-4 py-16">
+        <div className="mx-auto max-w-3xl">
+          <h1 className="mb-2 text-center text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+            CSV Insight Agent
+          </h1>
+          <p className="mb-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            Upload a CSV or Excel file to start asking questions about it.
+          </p>
+          <UploadArea onParsed={handleParsed} />
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-3xl flex-col px-4">
-      <div className="border-b border-gray-200 py-3">
-        <p className="text-sm font-medium text-gray-700">{dataset.filename}</p>
-        <p className="text-xs text-gray-400">
-          {dataset.row_count.toLocaleString()} rows · {dataset.column_count} columns
-        </p>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-gray-200 dark:border-gray-800">
+        <div className="mx-auto w-full max-w-3xl px-4 py-3">
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{dataset.filename}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            {dataset.row_count.toLocaleString()} rows · {dataset.column_count} columns
+          </p>
+        </div>
       </div>
 
-      {networkError && (
-        <div className="mt-3 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
-          <span>{networkError}</span>
-          <button onClick={() => setNetworkError(null)} className="ml-4 font-medium underline">
-            Dismiss
-          </button>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4">
+          {networkError && (
+            <div className="mt-3 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+              <span>{networkError}</span>
+              <button onClick={() => setNetworkError(null)} className="ml-4 font-medium underline">
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          <ChatThread turns={turns} />
         </div>
-      )}
+      </div>
 
-      <ChatThread turns={turns} />
-
-      <ChatInput
-        disabled={isRunInFlight || !!networkError}
-        disabledReason={isRunInFlight ? 'Waiting for the current answer…' : "Can't reach the server…"}
-        onSend={handleSend}
-      />
+      <div className="border-t border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
+        <div className="mx-auto w-full max-w-3xl">
+          <ChatInput
+            disabled={isRunInFlight || !!networkError}
+            disabledReason={isRunInFlight ? 'Waiting for the current answer…' : "Can't reach the server…"}
+            onSend={handleSend}
+          />
+        </div>
+      </div>
     </div>
   )
 }

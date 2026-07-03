@@ -82,7 +82,10 @@ test.describe('Phase 1 — Ask One Question, See the Whole Answer', () => {
     expect(codeText.trim().length).toBeGreaterThan(0)
 
     // --- 5. Navigate to History, confirm the run appears and reproduces ---
-    await page.getByRole('link', { name: 'History' }).click()
+    // Redesign note (Phase 3): the ChatGPT-style sidebar exposes both a "History"
+    // nav link and a "View all history" footer link. Match the nav link exactly
+    // so the selector stays unambiguous (same real element/behavior as before).
+    await page.getByRole('link', { name: 'History', exact: true }).click()
     await expect(page).toHaveURL(/\/history\/?$/)
 
     const historyList = page.getByTestId('history-list')
@@ -124,29 +127,48 @@ test.describe('Phase 1 — Ask One Question, See the Whole Answer', () => {
     const historyCodeText = await historyCodeBlock.innerText()
     expect(historyCodeText.trim().length).toBeGreaterThan(0)
 
-    // --- 6. Confirm the two Phase 1 stubs are visible and non-functional ---
-
-    // "Dataset Library" nav item: disabled, clicking does nothing.
-    const navStub = page.getByRole('button', { name: /dataset library/i })
-    await expect(navStub).toBeVisible()
-    await expect(navStub).toBeDisabled()
-    const urlBeforeStubClick = page.url()
-    await navStub.click({ force: true, trial: false }).catch(() => {
-      // Disabled controls may refuse the click entirely — that itself proves non-functionality.
-    })
-    expect(page.url()).toBe(urlBeforeStubClick)
+    // --- 6. Reconciliation with the redesigned DOM (Phase 3) ---
+    //
+    // In Phase 1 these two surfaces shipped as clearly-labelled, NON-functional
+    // stubs: a disabled "Dataset Library" nav item and disabled History
+    // search/filter controls. Phase 2 wired both into real features (the stub
+    // became the functional "Recent Datasets" picker; search/filter went live)
+    // and Phase 3 re-dressed them into the ChatGPT-style sidebar. This section
+    // is reconciled in lockstep to assert the redesigned reality — that both
+    // are now REAL, enabled, reachable controls. This STRENGTHENS the original
+    // stub assertions (functional > disabled); it does not weaken them.
 
     // History search/filter controls live on the list view, not the detail
     // view (History is a list/detail swap, not a side-by-side layout) — go
     // back to the list first.
     await page.getByRole('button', { name: /back to history/i }).click()
-    const searchBox = page.getByPlaceholder('Search by question text…')
-    await expect(searchBox).toBeVisible()
-    await expect(searchBox).toBeDisabled()
 
-    const dateFilters = page.locator('input[type="date"]')
-    await expect(dateFilters).toHaveCount(2)
-    await expect(dateFilters.first()).toBeDisabled()
-    await expect(dateFilters.nth(1)).toBeDisabled()
+    // History search + date filters are now real, enabled controls (Phase 2
+    // wired the Phase 1 stubs live).
+    const searchBox = page.getByTestId('history-search')
+    await expect(searchBox).toBeVisible()
+    await expect(searchBox).toBeEnabled()
+
+    const dateFrom = page.getByTestId('history-date-from')
+    const dateTo = page.getByTestId('history-date-to')
+    await expect(dateFrom).toBeVisible()
+    await expect(dateFrom).toBeEnabled()
+    await expect(dateTo).toBeVisible()
+    await expect(dateTo).toBeEnabled()
+
+    // The former disabled "Dataset Library — coming soon" nav stub is now the
+    // functional "Recent Datasets" picker, reachable from the sidebar. Match
+    // the nav link exactly (a collapsed-sidebar icon carries the same
+    // accessible name) and confirm it navigates to a real, wired screen.
+    const recentDatasetsLink = page.getByRole('link', { name: 'Recent Datasets', exact: true })
+    await expect(recentDatasetsLink).toBeVisible()
+    await recentDatasetsLink.click()
+    await expect(page).toHaveURL(/\/datasets\/?$/)
+
+    // The picker renders either its populated list or its labelled empty state —
+    // both prove the feature is real and wired, not a dead stub.
+    await expect(
+      page.locator('[data-testid="datasets-list"], [data-testid="datasets-empty"]'),
+    ).toBeVisible({ timeout: 15_000 })
   })
 })

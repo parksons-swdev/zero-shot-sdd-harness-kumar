@@ -10,9 +10,9 @@ REST (FastAPI), consumed by the Next.js frontend over `fetch()`. All responses u
 
 ### `POST /datasets`
 
-**Purpose:** Upload a CSV, parse and profile it, and create the session that will hold the resulting conversation.
+**Purpose:** Upload a CSV or Excel workbook, parse and profile it, and create the session that will hold the resulting conversation.
 
-**Request:** `multipart/form-data` with a `file` field (CSV, up to 100MB).
+**Request:** `multipart/form-data` with a `file` field, up to 100MB. Accepted formats (Phase 3): `.csv` (`text/csv`), `.xlsx` (`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), and legacy `.xls` (`application/vnd.ms-excel`). For Excel workbooks the **first sheet** is read. The response envelope is identical for all formats (`status`/`schema`/`anomalies`/`session_id` etc.) — downstream profiling/analysis operates on the resulting DataFrame regardless of source format.
 
 **Response (parsed successfully):**
 ```json
@@ -47,7 +47,7 @@ REST (FastAPI), consumed by the Next.js frontend over `fetch()`. All responses u
 **Error cases:**
 | Status | Condition |
 |--------|-----------|
-| 400 | Not a CSV, file missing, or exceeds the 100MB limit |
+| 400 | Not a `.csv`/`.xlsx`/`.xls` file, file missing, or exceeds the 100MB limit |
 | 500 | Local disk write or DB failure |
 
 ### `POST /datasets/{dataset_id}/decisions`

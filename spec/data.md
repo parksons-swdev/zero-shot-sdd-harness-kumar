@@ -12,13 +12,13 @@ Every entity is keyed by a UUID primary key from day one, and `Dataset` and `Ses
 
 ### Entity: Dataset
 
-Represents one uploaded CSV file and its precomputed profile. Immutable once successfully parsed — a re-upload creates a new `Dataset` row.
+Represents one uploaded tabular file — a CSV or an Excel workbook (`.xlsx`/`.xls`, first sheet) — and its precomputed profile. Immutable once successfully parsed — a re-upload creates a new `Dataset` row. Source format does not change the schema: Excel is parsed into a DataFrame by the ingestion pipeline (`spec/capabilities/dataset-ingestion.md`) and profiled/stored identically to CSV.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID (text) | yes | Primary key |
-| filename | text | yes | Original uploaded filename |
-| file_path | text | yes | Local disk path to the stored CSV |
+| filename | text | yes | Original uploaded filename (`.csv`, `.xlsx`, or `.xls`) |
+| file_path | text | yes | Local disk path to the stored upload (extension preserved) |
 | size_bytes | integer | yes | File size at upload time |
 | row_count | integer | no | Set once successfully parsed |
 | column_count | integer | no | Set once successfully parsed |

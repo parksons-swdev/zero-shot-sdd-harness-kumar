@@ -4,7 +4,7 @@
 
 ## System Overview
 
-The CSV Insight Agent is a local, single-user web application. The user's browser talks to a FastAPI backend running on the user's own machine. The backend parses and profiles uploaded CSVs entirely locally, stores the file and its computed profile on local disk / a local SQLite database, and runs a LangGraph agent that answers natural-language questions about the dataset. The agent may call the Gemini API to reason about the question and to write pandas analysis code, but the Gemini API never receives raw data rows — only schema metadata, computed statistics, small aggregated results, and code. All row-level pandas execution happens locally, in-process, on the backend.
+The CSV Insight Agent is a local, single-user web application. The user's browser talks to a FastAPI backend running on the user's own machine. The backend parses and profiles uploaded CSV or Excel (`.xlsx`/`.xls`, first sheet) files entirely locally, stores the file and its computed profile on local disk / a local SQLite database, and runs a LangGraph agent that answers natural-language questions about the dataset. The agent may call the Gemini API to reason about the question and to write pandas analysis code, but the Gemini API never receives raw data rows — only schema metadata, computed statistics, small aggregated results, and code. All row-level pandas execution happens locally, in-process, on the backend.
 
 ## Component Map
 
@@ -15,8 +15,10 @@ Browser (Next.js static export)
 FastAPI app  ──────────────────────────────┐
     │                                       │
     ├─ Dataset Ingestion Pipeline           │
-    │     (parse CSV, profile schema/stats, │
-    │      detect anomalies — local, no LLM)│
+    │     (parse CSV/Excel via a parse_file  │
+    │      dispatcher → DataFrame, profile   │
+    │      schema/stats, detect anomalies —  │
+    │      local, no LLM)                    │
     │                                       │
     ├─ LangGraph Ask-Question Agent         │
     │     ├─ Gemini API  ←──────────────────┘  (schema/stats/code ONLY — see Privacy Boundary)
@@ -24,7 +26,7 @@ FastAPI app  ──────────────────────�
     │
     └─ SQLite DB (datasets, sessions, messages, runs, run_steps)
           local disk file: ./data/agent.db
-          uploaded files:  ./data/uploads/<dataset_id>.csv
+          uploaded files:  ./data/uploads/<dataset_id>.<csv|xlsx|xls>
 ```
 
 ## Layers
@@ -98,7 +100,9 @@ FastAPI app  ──────────────────────�
 |-------------|---------|---------|
 | `langgraph` | latest 0.x | Ask-question agent graph |
 | `google-genai` | latest | Gemini API client |
-| `pandas` | ^2.2 | Local CSV parsing, profiling, and sandboxed analysis execution |
+| `pandas` | ^2.2 | Local CSV/Excel parsing, profiling, and sandboxed analysis execution |
+| `openpyxl` | latest | Reading `.xlsx` workbooks via `pandas.read_excel` (Phase 3) |
+| `xlrd` | latest | Reading legacy `.xls` workbooks via `pandas.read_excel` (Phase 3) |
 | `numpy` | ^2.x | Vectorized anomaly detection (outliers, null/format checks) |
 | `sqlalchemy` | ^2.0 | ORM for `Dataset`/`Session`/`Message`/`Run`/`RunStep` |
 | `alembic` | ^1.13 | Schema migrations |

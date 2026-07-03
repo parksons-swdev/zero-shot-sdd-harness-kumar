@@ -19,10 +19,20 @@ from config.settings import get_settings
 from db.models import Dataset, Session as SessionModel
 from db.session import get_session
 from domain.dataset import DatasetProfile, ParseDecision
-from tools.ingestion import CHOICE_REUPLOAD, CHOICE_SKIP_BAD_LINES, ParsedCsv, parse_csv
+from tools.ingestion import (
+    CHOICE_REUPLOAD,
+    CHOICE_SKIP_BAD_LINES,
+    ParsedCsv,
+    parse_file,
+)
 from tools.profiling import build_dataset_profile
 
 router = APIRouter()
+
+# Accepted upload formats (Phase 3): CSV plus Excel workbooks. The response
+# envelope is identical for all formats; downstream profiling operates on the
+# resulting DataFrame regardless of source format.
+ALLOWED_EXTENSIONS = (".csv", ".xlsx", ".xls")
 
 
 class DecisionRequest(BaseModel):
@@ -66,15 +76,22 @@ async def upload_dataset(
 ) -> dict:
     settings = get_settings()
 
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise api_error("INVALID_FILE", "Only .csv files are accepted.", 400)
+    if not file.filename or not file.filename.lower().endswith(ALLOWED_EXTENSIONS):
+        raise api_error(
+            "INVALID_FILE",
+            "Only .csv, .xlsx, and .xls files are accepted.",
+            400,
+        )
 
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     max_bytes = settings.max_upload_mb * 1024 * 1024
     dataset_id = str(uuid4())
-    dest_path = upload_dir / f"{dataset_id}.csv"
+    # Preserve the original extension so the decisions endpoint can re-parse
+    # the stored file with the correct (CSV vs Excel) path.
+    ext = Path(file.filename).suffix.lower()
+    dest_path = upload_dir / f"{dataset_id}{ext}"
 
     size = 0
     try:
@@ -109,8 +126,8 @@ async def upload_dataset(
     session.flush()
 
     try:
-        parsed = parse_csv(str(dest_path))
-    except Exception as exc:  # noqa: BLE001 - defensive; parse_csv itself never raises
+        parsed = parse_file(str(dest_path))
+    except Exception as exc:  # noqa: BLE001 - defensive; parse_file itself never raises
         raise api_error("PARSE_ERROR", f"Unexpected parsing failure: {exc}", 500) from exc
 
     if isinstance(parsed, ParseDecision):
@@ -159,7 +176,7 @@ def resolve_decision(
             )
         )
 
-    parsed = parse_csv(dataset.file_path, skip_bad_lines=True)
+    parsed = parse_file(dataset.file_path, skip_bad_lines=True)
     if isinstance(parsed, ParseDecision):
         return ok(_needs_decision_response(dataset, parsed))
 

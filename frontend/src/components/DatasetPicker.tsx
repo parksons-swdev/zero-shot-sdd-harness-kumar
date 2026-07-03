@@ -82,7 +82,7 @@ export default function DatasetPicker() {
     return (
       <div className="space-y-2" data-testid="datasets-loading">
         {[0, 1, 2].map(i => (
-          <div key={i} className="h-16 animate-pulse rounded-lg bg-gray-100" />
+          <div key={i} className="h-16 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
         ))}
       </div>
     )
@@ -90,7 +90,7 @@ export default function DatasetPicker() {
 
   if (error) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
         {error}{' '}
         <button className="ml-2 underline" onClick={load}>
           Retry
@@ -102,7 +102,7 @@ export default function DatasetPicker() {
   if (datasets.length === 0) {
     return (
       <div
-        className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-500"
+        className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400"
         data-testid="datasets-empty"
       >
         No datasets yet — upload one to get started.
@@ -113,7 +113,7 @@ export default function DatasetPicker() {
   return (
     <div>
       {openError && (
-        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
           {openError}
         </div>
       )}
@@ -126,15 +126,15 @@ export default function DatasetPicker() {
                 type="button"
                 disabled={opening !== null}
                 onClick={() => handleSelect(ds)}
-                className="block w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:shadow disabled:cursor-not-allowed disabled:opacity-60"
+                className="block w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:shadow disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-blue-700"
               >
                 <div className="flex items-start justify-between gap-4">
-                  <p className="line-clamp-1 text-sm font-medium text-gray-900">{ds.filename}</p>
+                  <p className="line-clamp-1 text-sm font-medium text-gray-900 dark:text-gray-100">{ds.filename}</p>
                   {isOpening && (
-                    <span className="shrink-0 text-xs font-medium text-blue-600">Opening…</span>
+                    <span className="shrink-0 text-xs font-medium text-blue-600 dark:text-blue-400">Opening…</span>
                   )}
                 </div>
-                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
                   <span>{ds.row_count.toLocaleString()} rows</span>
                   <span>·</span>
                   <span>{formatTimestamp(ds.created_at)}</span>

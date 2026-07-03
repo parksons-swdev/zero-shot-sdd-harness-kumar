@@ -14,8 +14,9 @@ A capability is a single, discrete action or behavior the agent performs.
 | Conversational Data Analysis | [conversational-data-analysis.md](conversational-data-analysis.md) |
 | Conversation Memory | [conversation-memory.md](conversation-memory.md) |
 | Run History | [run-history.md](run-history.md) |
+| UI Experience (ChatGPT-Style Layout & Theming) | [ui-experience.md](ui-experience.md) |
 
-Phase 1 delivers a real, working baseline of all four capabilities on the primary journey (upload → ask → answer, with memory and a persisted audit trail). Phase 2 deepens Conversational Data Analysis (richer retry strategies, large-file scale), Run History (search/filter), and Conversation Memory (dataset reselect) — see `spec/roadmap.md` → Phases of Development.
+Phase 1 delivers a real, working baseline of the first four capabilities on the primary journey (upload → ask → answer, with memory and a persisted audit trail). Phase 2 deepens Conversational Data Analysis (richer retry strategies, large-file scale), Run History (search/filter), and Conversation Memory (dataset reselect). Phase 3 extends Dataset Ingestion to Excel (`.xlsx`/`.xls`, first sheet) and adds the UI Experience capability (ChatGPT-style layout + dark/light theme) — see `spec/roadmap.md` → Phases of Development.
 
 ## How to Add a New Capability
 

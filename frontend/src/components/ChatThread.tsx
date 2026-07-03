@@ -10,7 +10,7 @@ export default function ChatThread({ turns }: ChatThreadProps) {
   if (turns.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center py-16">
-        <p className="text-sm text-gray-400">Ask a question about your dataset to get started.</p>
+        <p className="text-sm text-gray-400 dark:text-gray-500">Ask a question about your dataset to get started.</p>
       </div>
     )
   }

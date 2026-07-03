@@ -1,9 +1,14 @@
-"""Deterministic, local-only CSV ingestion.
+"""Deterministic, local-only tabular ingestion.
 
-Given a file path, attempts to parse it as tabular data with pandas.
-Never raises on a malformed/ambiguous file and never guesses-and-proceeds
-on a structural problem -- it always returns a value: either a
-`ParsedCsv` (success) or a `ParseDecision` (needs a user choice).
+Given a file path, attempts to parse it as tabular data with pandas -- a CSV
+or an Excel workbook (`.xlsx`/`.xls`, first sheet only). Never raises on a
+malformed/ambiguous file and never guesses-and-proceeds on a structural
+problem -- it always returns a value: either a `ParsedCsv` (success) or a
+`ParseDecision` (needs a user choice).
+
+All formats funnel through the same `ParsedCsv` / `ParseDecision` contract, so
+every downstream profiling/anomaly/graph consumer operates on the resulting
+DataFrame identically regardless of source format.
 
 No DB access, no LLM calls. See `spec/capabilities/dataset-ingestion.md`.
 """
@@ -12,12 +17,21 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import re
 from dataclasses import dataclass
 
 import pandas as pd
 
 from domain.dataset import ParseDecision
+
+# Excel engines by extension. `.xlsx` (and `.xlsm`) via openpyxl; legacy
+# `.xls` via xlrd. Anything else routes to the CSV path.
+_EXCEL_ENGINES = {
+    ".xlsx": "openpyxl",
+    ".xlsm": "openpyxl",
+    ".xls": "xlrd",
+}
 
 # The only two choices the API contract (`spec/data.md` / `spec/api.md`)
 # accepts back from the user for a `needs_decision` dataset.
@@ -38,6 +52,99 @@ class ParsedCsv:
 
 
 ParseResult = ParsedCsv | ParseDecision
+
+
+def parse_file(file_path: str, *, skip_bad_lines: bool = False) -> ParseResult:
+    """Parse a tabular file, routing by extension.
+
+    `.xlsx`/`.xlsm`/`.xls` go through `parse_excel`; everything else (notably
+    `.csv`) goes through `parse_csv`. Returns the same `ParsedCsv` (success) or
+    `ParseDecision` (needs-a-user-choice) contract regardless of format, and
+    never raises.
+
+    `skip_bad_lines` only applies to the CSV path (Excel has no ragged-row
+    retry semantics); it is accepted here so callers can use one signature for
+    both the initial parse and the `skip_bad_lines` decision retry.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in _EXCEL_ENGINES:
+        return parse_excel(file_path)
+    return parse_csv(file_path, skip_bad_lines=skip_bad_lines)
+
+
+def parse_excel(file_path: str) -> ParseResult:
+    """Parse the FIRST sheet of an Excel workbook into a DataFrame.
+
+    Uses openpyxl for `.xlsx`/`.xlsm` and xlrd for legacy `.xls`. Returns a
+    `ParsedCsv` on success or a `ParseDecision` (`choices=["reupload"]`) for a
+    corrupt/unreadable workbook, an empty workbook, or an empty first sheet.
+    Never raises -- any failure is mapped to a `ParseDecision`.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    engine = _EXCEL_ENGINES.get(ext, "openpyxl")
+
+    try:
+        if not os.path.exists(file_path):
+            raise OSError("file does not exist")
+        if os.path.getsize(file_path) == 0:
+            return ParseDecision(
+                issue="The uploaded file is empty.",
+                choices=[CHOICE_REUPLOAD],
+            )
+        # sheet_name=0 -> read only the first sheet as a DataFrame.
+        df = pd.read_excel(file_path, sheet_name=0, engine=engine)
+    except OSError as exc:
+        return ParseDecision(
+            issue=f"The file could not be read from disk: {exc}",
+            choices=[CHOICE_REUPLOAD],
+        )
+    except ValueError as exc:
+        # Empty workbook (no sheets), bad engine/format mismatch, etc.
+        return ParseDecision(
+            issue=f"The Excel workbook could not be read: {exc}",
+            choices=[CHOICE_REUPLOAD],
+        )
+    except Exception as exc:  # noqa: BLE001 - defensive: corrupt file, engine error
+        return ParseDecision(
+            issue=f"The Excel workbook could not be parsed: {exc}",
+            choices=[CHOICE_REUPLOAD],
+        )
+
+    if df.shape[1] == 0 or df.shape[0] == 0:
+        return ParseDecision(
+            issue="The workbook's first sheet has no data rows / no columns.",
+            choices=[CHOICE_REUPLOAD],
+        )
+
+    # Normalize column names to strings so downstream code (which assumes
+    # string column labels, as the CSV path yields) behaves identically.
+    df.columns = [str(c) for c in df.columns]
+
+    header_issue = _check_excel_header(list(df.columns))
+    if header_issue is not None:
+        return header_issue
+
+    return ParsedCsv(
+        df=df,
+        row_count=len(df),
+        column_count=len(df.columns),
+        warnings=None,
+    )
+
+
+def _check_excel_header(columns: list[str]) -> ParseDecision | None:
+    if any(not c.strip() or c.startswith("Unnamed:") for c in columns):
+        return ParseDecision(
+            issue="The workbook's first sheet has one or more empty column names.",
+            choices=[CHOICE_REUPLOAD],
+        )
+    normalized = [c.strip() for c in columns]
+    if len(normalized) != len(set(normalized)):
+        return ParseDecision(
+            issue="The workbook's first sheet has duplicate column names.",
+            choices=[CHOICE_REUPLOAD],
+        )
+    return None
 
 
 def parse_csv(file_path: str, *, skip_bad_lines: bool = False) -> ParseResult:

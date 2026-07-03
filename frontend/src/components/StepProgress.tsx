@@ -25,17 +25,17 @@ export default function StepProgress({ stepCount, totalEstimatedSteps, currentSt
   const elapsedSeconds = (elapsedMs / 1000).toFixed(1)
 
   return (
-    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4" data-testid="step-progress">
-      <div className="mb-2 flex items-center justify-between text-sm font-medium text-blue-900">
+    <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950" data-testid="step-progress">
+      <div className="mb-2 flex items-center justify-between text-sm font-medium text-blue-900 dark:text-blue-200">
         <span>
           Step {stepCount} of {total}
         </span>
-        <span className="text-blue-700">{elapsedSeconds}s elapsed</span>
+        <span className="text-blue-700 dark:text-blue-400">{elapsedSeconds}s elapsed</span>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-blue-100">
-        <div className="h-full rounded-full bg-blue-600 transition-all duration-300" style={{ width: `${pct}%` }} />
+      <div className="h-2 w-full overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900">
+        <div className="h-full rounded-full bg-blue-600 transition-all duration-300 dark:bg-blue-400" style={{ width: `${pct}%` }} />
       </div>
-      {currentStepLabel && <p className="mt-2 text-xs text-blue-700">{currentStepLabel}</p>}
+      {currentStepLabel && <p className="mt-2 text-xs text-blue-700 dark:text-blue-400">{currentStepLabel}</p>}
     </div>
   )
 }
