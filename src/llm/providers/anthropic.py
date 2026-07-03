@@ -7,6 +7,7 @@ class AnthropicProvider:
     def __init__(self, api_key: str, model: str) -> None:
         self._client = _sdk.Anthropic(api_key=api_key)
         self._model = model or self.DEFAULT_MODEL
+        self.last_usage = {"input_tokens": 0, "output_tokens": 0}
 
     def call_model(self, prompt: str, *, system: str | None = None) -> str:
         kwargs: dict = dict(
@@ -17,4 +18,8 @@ class AnthropicProvider:
         if system:
             kwargs["system"] = system
         msg = self._client.messages.create(**kwargs)
+        self.last_usage = {
+            "input_tokens": getattr(msg.usage, "input_tokens", 0) or 0,
+            "output_tokens": getattr(msg.usage, "output_tokens", 0) or 0,
+        }
         return msg.content[0].text
