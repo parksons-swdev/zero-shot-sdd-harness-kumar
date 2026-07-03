@@ -1,23 +1,21 @@
 # Capabilities Index
 
-> **Boilerplate status:** The spec-writer sub-agent creates one file per capability in this directory. Each file describes exactly one discrete thing the agent can do.
-
 ---
 
 ## What Is a Capability?
 
-A capability is a single, discrete action or behavior the agent performs. Examples:
-- "Search the web for companies matching criteria X"
-- "Draft a personalized email given a lead profile"
-- "Send a Slack notification when a threshold is crossed"
+A capability is a single, discrete action or behavior the agent performs.
 
 ## Capabilities in This Project
 
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file (no number prefix). -->
-
 | Capability | File |
 |-----------|------|
-| <!-- name --> | [name.md](name.md) |
+| Dataset Ingestion | [dataset-ingestion.md](dataset-ingestion.md) |
+| Conversational Data Analysis | [conversational-data-analysis.md](conversational-data-analysis.md) |
+| Conversation Memory | [conversation-memory.md](conversation-memory.md) |
+| Run History | [run-history.md](run-history.md) |
+
+Phase 1 delivers a real, working baseline of all four capabilities on the primary journey (upload → ask → answer, with memory and a persisted audit trail). Phase 2 deepens Conversational Data Analysis (richer retry strategies, large-file scale), Run History (search/filter), and Conversation Memory (dataset reselect) — see `spec/roadmap.md` → Phases of Development.
 
 ## How to Add a New Capability
 
@@ -34,5 +32,5 @@ Each capability file should answer:
 - **Inputs** (what data it receives)
 - **Outputs** (what it produces)
 - **External calls** (APIs, LLMs, databases it touches)
-- **Error cases** (what can go wrong and how it's handled)
+- **Business rules** (constraints and edge-case handling)
 - **Success criteria** (how we test it)
