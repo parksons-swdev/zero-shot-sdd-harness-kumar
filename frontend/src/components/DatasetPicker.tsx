@@ -10,6 +10,7 @@ import {
   type DatasetParsed,
   type DatasetSummary,
 } from '@/lib/api'
+import { parseServerDate } from '@/lib/dates'
 
 // Key under which a reselected dataset (profile + freshly-created session_id) is
 // handed to the Analyze workspace (`/`), which hydrates straight into the chat
@@ -18,7 +19,7 @@ export const RESELECT_STORAGE_KEY = 'csv-reselect-dataset'
 
 function formatTimestamp(iso: string): string {
   try {
-    return new Date(iso).toLocaleString()
+    return parseServerDate(iso).toLocaleString()
   } catch {
     return iso
   }

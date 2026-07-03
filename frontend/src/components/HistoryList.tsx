@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { listRuns, ApiError, type RunSummary } from '@/lib/api'
 import HistoryFilters, { type HistoryFilterValues } from '@/components/HistoryFilters'
+import { parseServerDate } from '@/lib/dates'
 
 export type HistoryRunSummary = RunSummary
 
@@ -26,7 +27,7 @@ function statusBadgeClass(status: string): string {
 
 function formatTimestamp(iso: string): string {
   try {
-    return new Date(iso).toLocaleString()
+    return parseServerDate(iso).toLocaleString()
   } catch {
     return iso
   }
