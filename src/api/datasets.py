@@ -169,6 +169,32 @@ def resolve_decision(
     return ok(_dataset_response(dataset))
 
 
+@router.get("/datasets")
+def list_datasets(session: Session = Depends(get_session)) -> dict:
+    """Recent, reselectable datasets — reverse-chronological.
+
+    Only `parsed` datasets appear: a dataset in `uploaded`, `needs_decision`,
+    or `failed` state has no usable profile and cannot back a new session.
+    """
+    datasets = (
+        session.query(Dataset)
+        .filter(Dataset.status == "parsed")
+        .order_by(Dataset.created_at.desc())
+        .all()
+    )
+    return ok(
+        [
+            {
+                "dataset_id": d.id,
+                "filename": d.filename,
+                "row_count": d.row_count,
+                "created_at": d.created_at.isoformat(),
+            }
+            for d in datasets
+        ]
+    )
+
+
 @router.get("/datasets/{dataset_id}")
 def get_dataset(dataset_id: str, session: Session = Depends(get_session)) -> dict:
     dataset = session.get(Dataset, dataset_id)

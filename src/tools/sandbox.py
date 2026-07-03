@@ -163,6 +163,21 @@ def _is_scalar(value) -> bool:
     return False
 
 
+def json_safe_key(key):
+    """Coerces a dict key to a JSON-serializable primitive.
+
+    JSON object keys must be str/int/float/bool/None. A pandas `groupby` on a
+    derived dimension (e.g. "revenue by month") produces `Period`/`Timestamp`/
+    tuple/numpy keys, which crash `json.dumps` — `default=` only applies to
+    values, never to keys. Any non-primitive key is coerced to its string form
+    so the aggregate serializes (into an LLM prompt, the DB, or the frontend)
+    instead of fatally crashing the run.
+    """
+    if key is None or isinstance(key, (str, bool, int, float)):
+        return key
+    return str(key)
+
+
 def _classify_value(value):
     """Returns the sanitized version of a single result value.
 
@@ -194,7 +209,7 @@ def _classify_value(value):
 
     if isinstance(value, dict):
         if len(value) <= MAX_AGGREGATE_ROWS and all(_is_scalar(v) for v in value.values()):
-            return value
+            return {json_safe_key(k): v for k, v in value.items()}
         return {"_type": "dict", "keys_count": len(value)}
 
     if isinstance(value, (list, tuple)):
@@ -239,4 +254,4 @@ def sanitize_result(full_result: dict | None) -> dict | None:
         return None
     if not isinstance(full_result, dict):
         return {"_type": type(full_result).__name__}
-    return {key: _classify_value(val) for key, val in full_result.items()}
+    return {json_safe_key(key): _classify_value(val) for key, val in full_result.items()}

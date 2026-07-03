@@ -32,7 +32,55 @@ except ImportError:  # pragma: no cover - only if dataset-ingestion hasn't lande
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 _MAX_HISTORY_TURNS = 10
-_DEFAULT_MAX_ATTEMPTS = 3
+# Phase 2 (analysis-graph-hardening): raised from 3 to 4 so the retry loop has
+# room to walk through the distinct named strategies below (attempt 1 = plain,
+# attempts 2/3/4 = simplify / alternate shape / drop-offending-column).
+_DEFAULT_MAX_ATTEMPTS = 4
+
+# Distinct, named retry strategies threaded into the generate_code prompt, one
+# per retry attempt (spec/agent.md: "Phase 2 supplies named alternate
+# strategies: simplify the aggregation, change chart type, drop a column that
+# caused a type error"). Attempt 1 has no strategy (fresh best effort); each
+# retry gets a materially different instruction so the model does not just
+# re-run a cosmetic variant of the same failing approach.
+_RETRY_STRATEGIES: dict[int, str] = {
+    2: (
+        "SIMPLIFY THE AGGREGATION. The previous attempt was insufficient or "
+        "errored. Use the single most direct reduction that answers the "
+        "question — one clean groupby + one aggregation (sum/mean/count), no "
+        "chained transforms, no derived intermediate columns."
+    ),
+    3: (
+        "TRY AN ALTERNATE RESULT SHAPE / CHART TYPE. Keep the analysis simple "
+        "but change how the result is framed — e.g. switch from a per-category "
+        "total to counts or proportions, or from a grouped breakdown to an "
+        "overall summary — so the observation step has a different, cleaner "
+        "aggregate to reason about."
+    ),
+    4: (
+        "DROP THE OFFENDING COLUMN / COERCE TYPES. A prior attempt likely hit a "
+        "type or missing-data error. Identify the column implicated in the prior "
+        "sanitized error and either exclude it or explicitly coerce it "
+        "(pd.to_numeric(..., errors='coerce'), dropna) before aggregating, so the "
+        "computation cannot raise on bad/mixed values."
+    ),
+}
+_DEFAULT_STRATEGY = (
+    "Take a fundamentally different approach from every prior attempt shown — a "
+    "different column, aggregation, or type handling."
+)
+
+
+def _strategy_for_attempt(attempt_number: int) -> str | None:
+    """The named strategy hint for the code-gen attempt about to be made.
+
+    Attempt 1 has no hint (return None). Attempts 2/3/4 map to distinct named
+    strategies; any attempt beyond the table falls back to the generic
+    'different approach' hint.
+    """
+    if attempt_number <= 1:
+        return None
+    return _RETRY_STRATEGIES.get(attempt_number, _DEFAULT_STRATEGY)
 
 log = get_logger("graph")
 
@@ -215,19 +263,56 @@ def ask_clarification(state: AnalysisState) -> AnalysisState:
 
 
 def _build_generate_code_prompt(state: AnalysisState) -> str:
+    # The attempt this call is about to produce (attempt_count is 0-based
+    # until generate_code increments it on success).
+    upcoming_attempt = state.get("attempt_count", 0) + 1
+    strategy = _strategy_for_attempt(upcoming_attempt)
     payload = {
         "question": state.get("question"),
         "plan": state.get("plan"),
         "dataset_schema": state.get("dataset_schema"),
         "dataset_anomalies": state.get("dataset_anomalies"),
         "prior_attempts": state.get("code_attempts", []),
-        "instruction": (
-            "Try a different approach from any prior attempt shown above."
-            if state.get("code_attempts")
-            else None
-        ),
+        "attempt_number": upcoming_attempt,
+        # Explicit named strategy for THIS retry (None on the first attempt).
+        "retry_strategy": strategy,
+        "instruction": strategy,
     }
     return json.dumps(payload, default=str)
+
+
+def _retryable_codegen_failure(state: AnalysisState, exc: Exception) -> AnalysisState:
+    """A malformed-JSON / invalid-`analyze` response from the model is a
+    RETRYABLE reasoning failure, not a fatal framework error. We bump
+    `attempt_count`, record a SANITIZED failure marker (never the raw model
+    output, per the Privacy Boundary) as this attempt's execution error, and
+    leave `generated_code` as None so `after_generate_code` routes back into
+    the observe/decide retry loop instead of `handle_error`.
+    """
+    attempt_count = state.get("attempt_count", 0) + 1
+    sanitized = (
+        f"attempt {attempt_count}: model returned malformed or invalid code output "
+        f"({type(exc).__name__}); retrying with a different approach"
+    )
+    log.warning("generate_code_retryable", attempt=attempt_count, reason=type(exc).__name__)
+    steps, step_count = _append_step(
+        state,
+        "generate_code",
+        f"Writing analysis code (attempt {attempt_count})",
+        is_error=True,
+        output_summary=sanitized,
+    )
+    return {
+        **state,
+        "generated_code": None,
+        "attempt_count": attempt_count,
+        "execution_result": None,
+        "execution_full_result": None,
+        "execution_error": sanitized,
+        "steps": steps,
+        "step_count": step_count,
+        "error": None,
+    }
 
 
 def generate_code(state: AnalysisState) -> AnalysisState:
@@ -256,7 +341,13 @@ def generate_code(state: AnalysisState) -> AnalysisState:
             "step_count": step_count,
             "error": None,
         }
+    except ValueError as exc:
+        # Malformed JSON (raised by LLMClient.call_json) or an invalid
+        # `analyze` body — retryable, feed back into the loop.
+        return _retryable_codegen_failure(state, exc)
     except Exception as exc:  # noqa: BLE001
+        # Truly unexpected framework-level failure (incl. LLMQuotaError /
+        # LLMTransientError, which are RuntimeError subclasses) — fatal.
         log.error("generate_code_failed", error=str(exc))
         return {**state, "error": f"generate_code failed: {exc}"}
 
@@ -267,8 +358,46 @@ def generate_code(state: AnalysisState) -> AnalysisState:
 
 
 def execute_code(state: AnalysisState) -> AnalysisState:
-    df = _dataframe_cache.get(state["dataset_id"])
-    outcome = run_user_code(state.get("generated_code", ""), df)
+    # Pass-through for a retryable code-generation failure: `generate_code`
+    # left `generated_code` None and already recorded a sanitized failure in
+    # `execution_error` (execution_result None). There is nothing to run — keep
+    # that failure intact and let observe_and_decide absorb it into the retry
+    # loop, rather than running the sandbox on empty code.
+    if not state.get("generated_code"):
+        return state
+
+    try:
+        df = _dataframe_cache.get(state["dataset_id"])
+        outcome = run_user_code(state.get("generated_code", ""), df)
+        result_summary = outcome["error"] or json.dumps(outcome["result"], default=str)[:500]
+    except Exception as exc:  # noqa: BLE001
+        # Defensive: `run_user_code` already turns user-code errors into
+        # `outcome["error"]`, so reaching here means an UNEXPECTED failure —
+        # e.g. a result that still can't be JSON-serialized (a non-primitive
+        # dict KEY, which `default=` cannot coerce). This must degrade to a
+        # retryable execution failure, NOT crash the graph fatally (which
+        # bypasses the retry loop and leaves the run with no code/explanation).
+        # We record only the exception TYPE (never the raw result — Privacy
+        # Boundary) and keep `generated_code` so the stuck-point view can show
+        # the attempt.
+        sanitized = f"result could not be processed ({type(exc).__name__}); retrying with a different approach"
+        log.warning("execute_code_unexpected", reason=type(exc).__name__)
+        steps, step_count = _append_step(
+            state,
+            "execute_code",
+            "Running analysis code",
+            is_error=True,
+            code_snippet=state.get("generated_code"),
+            output_summary=sanitized,
+        )
+        return {
+            **state,
+            "execution_full_result": None,
+            "execution_result": None,
+            "execution_error": sanitized,
+            "steps": steps,
+            "step_count": step_count,
+        }
 
     steps, step_count = _append_step(
         state,
@@ -276,7 +405,7 @@ def execute_code(state: AnalysisState) -> AnalysisState:
         "Running analysis code",
         is_error=bool(outcome["error"]),
         code_snippet=state.get("generated_code"),
-        output_summary=outcome["error"] or json.dumps(outcome["result"], default=str)[:500],
+        output_summary=result_summary,
     )
 
     return {
@@ -307,17 +436,26 @@ def _build_observe_prompt(state: AnalysisState) -> str:
 
 def observe_and_decide(state: AnalysisState) -> AnalysisState:
     token_usage = state.get("token_usage") or {"input_tokens": 0, "output_tokens": 0}
-    try:
-        system = _load_prompt("observe_and_decide")
-        client = _fast_client()
-        result = client.call_json(_build_observe_prompt(state), system=system)
-        sufficient = bool(result.get("sufficient", False))
-        reason = result.get("reason", "")
-        token_usage = _accumulate_usage(state, client)
-    except Exception as exc:  # noqa: BLE001
-        log.error("observe_and_decide_failed", error=str(exc))
+    # Short-circuit: if the attempt produced no result at all (a sandbox
+    # execution error OR a retryable code-generation failure), it is
+    # unambiguously insufficient — skip the LLM decision call entirely. This
+    # both saves a Gemini call against the 30s budget and makes a
+    # malformed-JSON codegen failure route straight into a retry.
+    if state.get("execution_result") is None:
         sufficient = False
-        reason = f"observation step failed: {exc}"
+        reason = state.get("execution_error") or "no result was produced"
+    else:
+        try:
+            system = _load_prompt("observe_and_decide")
+            client = _fast_client()
+            result = client.call_json(_build_observe_prompt(state), system=system)
+            sufficient = bool(result.get("sufficient", False))
+            reason = result.get("reason", "")
+            token_usage = _accumulate_usage(state, client)
+        except Exception as exc:  # noqa: BLE001
+            log.error("observe_and_decide_failed", error=str(exc))
+            sufficient = False
+            reason = f"observation step failed: {exc}"
 
     attempt_count = state.get("attempt_count", 0)
     max_attempts = state.get("max_attempts", _DEFAULT_MAX_ATTEMPTS)

@@ -16,3 +16,13 @@ build/
 *.db-shm
 *.db-wal
 data/
+
+# Playwright artifacts
+test-results/
+playwright-report/
+frontend/test-results/
+frontend/playwright-report/
+
+# Large generated sample CSVs (see scripts/make_large_sample.py) — never commit
+large_sample*.csv
+*_large_sample.csv

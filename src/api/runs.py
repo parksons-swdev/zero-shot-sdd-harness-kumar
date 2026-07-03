@@ -7,12 +7,35 @@ run) plus these read endpoints, not a generic `/runs` create route.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from api._common import api_error, ok
 from db.models import Dataset, Run
 from db.session import get_session
+
+
+def _parse_iso(value: str, field: str) -> datetime:
+    """Parse an ISO date or datetime string into a timezone-aware datetime.
+
+    Accepts a plain date (``2026-07-01``) or a full ISO datetime, with or
+    without a trailing ``Z``. Naive values are assumed UTC so the comparison
+    against the timezone-aware ``created_at`` column is well-defined.
+    """
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise api_error(
+            "INVALID_DATE", f"{field} must be an ISO date or datetime: {value!r}", 400
+        ) from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 router = APIRouter()
 
@@ -83,10 +106,28 @@ def get_run(run_id: str, session: Session = Depends(get_session)) -> dict:
 def list_runs(
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    q: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
     session: Session = Depends(get_session),
 ) -> dict:
+    query = session.query(Run)
+
+    if q and q.strip():
+        # Case-insensitive substring search on the question text. SQLAlchemy's
+        # ilike() emits a dialect-safe case-insensitive LIKE; escape LIKE
+        # wildcards in the user's term so they match literally.
+        term = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query = query.filter(Run.question_text.ilike(f"%{term}%", escape="\\"))
+
+    if date_from is not None and date_from.strip():
+        query = query.filter(Run.created_at >= _parse_iso(date_from, "date_from"))
+
+    if date_to is not None and date_to.strip():
+        query = query.filter(Run.created_at <= _parse_iso(date_to, "date_to"))
+
     runs = (
-        session.query(Run)
+        query
         .order_by(Run.created_at.desc())
         .offset(offset)
         .limit(limit)

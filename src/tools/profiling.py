@@ -24,6 +24,15 @@ ANOMALY_INCONSISTENT_FORMAT = "inconsistent_format"
 ANOMALY_DUPLICATE_ROWS = "duplicate_rows"
 
 MISSING_VALUE_THRESHOLD_PCT = 5.0  # flag columns with >5% nulls
+
+# String-based anomaly heuristics (mixed-type / inconsistent-format detection)
+# scan text values with regex/coercion. On files approaching 100MB these full
+# scans dominate profiling time, so above this many non-null values we evaluate
+# the heuristic on a deterministic random sample and scale the reported counts.
+# This affects ONLY the heuristic anomaly flags -- every numeric summary
+# statistic and null count in `profile_dataframe` is still computed over the
+# FULL column, so quantitative correctness is never traded for speed.
+STRING_SCAN_SAMPLE_SIZE = 50_000
 _DATE_FORMAT_PATTERNS: dict[str, str] = {
     "iso_yyyy_mm_dd": r"^\d{4}-\d{2}-\d{2}$",
     "us_mm_dd_yyyy": r"^\d{1,2}/\d{1,2}/\d{4}$",
@@ -151,6 +160,21 @@ def _outlier_anomalies(df: pd.DataFrame) -> list[Anomaly]:
     return anomalies
 
 
+def _scan_series(non_null: pd.Series) -> tuple[pd.Series, int]:
+    """Return a (possibly sampled) view of `non_null` for a text-heuristic
+    scan, plus the FULL non-null length so counts can be scaled back up.
+
+    For large columns this caps the expensive regex/coercion work at
+    ``STRING_SCAN_SAMPLE_SIZE`` values (deterministic random sample) while
+    leaving numeric summary statistics -- computed elsewhere over the full
+    column -- untouched.
+    """
+    total = len(non_null)
+    if total > STRING_SCAN_SAMPLE_SIZE:
+        return non_null.sample(n=STRING_SCAN_SAMPLE_SIZE, random_state=0), total
+    return non_null, total
+
+
 def _mixed_type_anomalies(df: pd.DataFrame) -> list[Anomaly]:
     anomalies: list[Anomaly] = []
     for column in df.columns:
@@ -159,16 +183,23 @@ def _mixed_type_anomalies(df: pd.DataFrame) -> list[Anomaly]:
             continue
 
         non_null = series.dropna()
-        if len(non_null) == 0:
+        total = len(non_null)
+        if total == 0:
             continue
 
-        as_str = non_null.astype(str)
+        scanned, total = _scan_series(non_null)
+        scanned_len = len(scanned)
+        as_str = scanned.astype(str)
         numeric_parsed = pd.to_numeric(as_str, errors="coerce")
-        numeric_count = int(numeric_parsed.notna().sum())
-        non_numeric_count = len(non_null) - numeric_count
+        numeric_frac = float(numeric_parsed.notna().mean())
+        # Scale sampled fractions back to full-column count estimates.
+        numeric_count = int(round(numeric_frac * total))
+        non_numeric_count = total - numeric_count
+        sampled_numeric = int(numeric_parsed.notna().sum())
+        sampled_non_numeric = scanned_len - sampled_numeric
 
-        if numeric_count > 0 and non_numeric_count > 0:
-            pct_mixed = (min(numeric_count, non_numeric_count) / len(non_null)) * 100
+        if sampled_numeric > 0 and sampled_non_numeric > 0:
+            pct_mixed = (min(numeric_frac, 1 - numeric_frac)) * 100
             severity = "high" if pct_mixed >= 20 else "medium" if pct_mixed >= 5 else "low"
             anomalies.append(
                 Anomaly(
@@ -195,10 +226,12 @@ def _inconsistent_format_anomalies(df: pd.DataFrame) -> list[Anomaly]:
         if len(non_null) == 0:
             continue
 
+        scanned, _total = _scan_series(non_null)
+
         matched_formats: dict[str, int] = {}
-        matched_mask = pd.Series(False, index=non_null.index)
+        matched_mask = pd.Series(False, index=scanned.index)
         for fmt_name, pattern in _DATE_FORMAT_PATTERNS.items():
-            mask = non_null.str.match(pattern)
+            mask = scanned.str.match(pattern)
             count = int(mask.sum())
             if count > 0:
                 matched_formats[fmt_name] = count
@@ -210,7 +243,7 @@ def _inconsistent_format_anomalies(df: pd.DataFrame) -> list[Anomaly]:
 
         # Only treat this as a date-like column if a meaningful share of
         # values look like a date at all.
-        if total_matched / len(non_null) < 0.5:
+        if total_matched / len(scanned) < 0.5:
             continue
 
         distinct_formats = {name for name, count in matched_formats.items() if count > 0}

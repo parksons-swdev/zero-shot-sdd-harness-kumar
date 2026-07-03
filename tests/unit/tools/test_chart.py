@@ -11,6 +11,8 @@ flat top-level shape silently fell through to `type: "none"` / `[]`.
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 from src.tools.chart import build_chart_spec, build_key_numbers, build_table_data
@@ -112,6 +114,31 @@ class TestNestedListOfDictsValue:
         spec = build_chart_spec(full_result)
         assert spec["type"] == "bar"
         assert build_table_data(full_result) == records
+
+
+class TestPeriodKeyAggregate:
+    """Regression: a "revenue by month" groupby yields pandas Period dict keys,
+    which are not JSON-serializable (json.dumps `default=` never applies to
+    keys) and previously crashed the run fatally, bypassing the retry loop.
+    Keys must be coerced to strings so the chart/table serialize."""
+
+    @staticmethod
+    def _month_full_result():
+        periods = pd.period_range("2024-01", periods=3, freq="M")
+        return {"total_revenue_by_month": {p: float(i * 1000) for i, p in enumerate(periods)}}
+
+    def test_chart_spec_serializes_with_string_x(self):
+        spec = build_chart_spec(self._month_full_result())
+        assert spec["type"] == "bar"
+        assert len(spec["x"]) == 3 and len(spec["y"]) == 3
+        assert all(isinstance(x, str) for x in spec["x"])
+        json.dumps(spec)  # must not raise
+
+    def test_table_data_serializes_with_string_keys(self):
+        table = build_table_data(self._month_full_result())
+        assert len(table) == 3
+        assert all(isinstance(row["key"], str) for row in table)
+        json.dumps(table)  # must not raise
 
 
 class TestEmptyOrNoneFullResult:

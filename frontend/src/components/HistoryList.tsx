@@ -1,17 +1,13 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { listRuns, ApiError, type RunSummary } from '@/lib/api'
+import HistoryFilters, { type HistoryFilterValues } from '@/components/HistoryFilters'
 
-export interface HistoryRunSummary {
-  run_id: string
-  dataset_filename: string
-  question_text: string
-  status: string
-  estimated_cost_usd: number | null
-  created_at: string
-}
+export type HistoryRunSummary = RunSummary
 
 const PAGE_SIZE = 20
+const SEARCH_DEBOUNCE_MS = 350
 
 function statusBadgeClass(status: string): string {
   switch (status) {
@@ -41,70 +37,92 @@ function formatCost(cost: number | null): string {
   return `$${cost.toFixed(4)}`
 }
 
+const EMPTY_FILTERS: HistoryFilterValues = { q: '', dateFrom: '', dateTo: '' }
+
 export default function HistoryList({ onSelectRun }: { onSelectRun: (runId: string) => void }) {
-  const [runs, setRuns] = useState<HistoryRunSummary[]>([])
+  const [runs, setRuns] = useState<RunSummary[]>([])
   const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
 
-  const load = useCallback(async (nextOffset: number) => {
+  // Raw controlled input values (update on every keystroke for a responsive UI).
+  const [filters, setFilters] = useState<HistoryFilterValues>(EMPTY_FILTERS)
+  // Debounced snapshot that actually drives the fetch.
+  const [appliedFilters, setAppliedFilters] = useState<HistoryFilterValues>(EMPTY_FILTERS)
+
+  // Debounce: whenever the raw filters change, wait for a quiet period before
+  // committing them to appliedFilters so we don't fire a request per keystroke.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setAppliedFilters(filters)
+    }, SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(handle)
+  }, [filters])
+
+  const hasActiveFilter =
+    appliedFilters.q.trim() !== '' ||
+    appliedFilters.dateFrom !== '' ||
+    appliedFilters.dateTo !== ''
+
+  // Fetch whenever the applied (debounced) filters or the page offset change.
+  // A ref guards against out-of-order responses overwriting fresher results.
+  const requestSeq = useRef(0)
+  useEffect(() => {
+    const seq = ++requestSeq.current
     setLoading(true)
     setError(null)
-    try {
-      const res = await fetch(`/runs?limit=${PAGE_SIZE}&offset=${nextOffset}`)
-      const body = await res.json()
-      if (!res.ok) {
-        throw new Error(body?.detail?.message ?? `Request failed (${res.status})`)
-      }
-      const items: HistoryRunSummary[] = body.data ?? []
-      setRuns(items)
-      setHasMore(items.length === PAGE_SIZE)
-      setOffset(nextOffset)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Can't reach the server — is it running?")
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    listRuns(PAGE_SIZE, offset, {
+      q: appliedFilters.q,
+      date_from: appliedFilters.dateFrom || undefined,
+      date_to: appliedFilters.dateTo || undefined,
+    })
+      .then(items => {
+        if (seq !== requestSeq.current) return
+        setRuns(items)
+        setHasMore(items.length === PAGE_SIZE)
+      })
+      .catch((err: unknown) => {
+        if (seq !== requestSeq.current) return
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : "Can't reach the server — is it running?",
+        )
+      })
+      .finally(() => {
+        if (seq !== requestSeq.current) return
+        setLoading(false)
+      })
+  }, [appliedFilters, offset])
 
+  // When the applied filters change, jump back to the first page.
   useEffect(() => {
-    load(0)
-  }, [load])
+    setOffset(0)
+  }, [appliedFilters])
+
+  function handleFilterChange(next: HistoryFilterValues) {
+    setFilters(next)
+  }
+
+  function handleClear() {
+    setFilters(EMPTY_FILTERS)
+    setAppliedFilters(EMPTY_FILTERS)
+    setOffset(0)
+  }
+
+  function retry() {
+    // Re-trigger the fetch effect by bumping the sequence via a filter identity change.
+    setAppliedFilters(prev => ({ ...prev }))
+  }
+
+  const emptyMessage = hasActiveFilter
+    ? 'No matching runs. Try a different search or date range.'
+    : 'No past runs yet. Ask a question on the Analyze screen to get started.'
 
   return (
     <div>
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="group relative flex-1">
-            <input
-              type="search"
-              disabled
-              placeholder="Search by question text…"
-              title="Search — coming in a future update"
-              className="w-full cursor-not-allowed rounded-lg border border-dashed border-gray-300 bg-gray-100 px-3 py-2 text-sm text-gray-400 placeholder:text-gray-400"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              disabled
-              title="Date range filter — coming in a future update"
-              className="cursor-not-allowed rounded-lg border border-dashed border-gray-300 bg-gray-100 px-3 py-2 text-sm text-gray-400"
-            />
-            <span className="text-xs text-gray-400">to</span>
-            <input
-              type="date"
-              disabled
-              title="Date range filter — coming in a future update"
-              className="cursor-not-allowed rounded-lg border border-dashed border-gray-300 bg-gray-100 px-3 py-2 text-sm text-gray-400"
-            />
-          </div>
-        </div>
-      </div>
-      <p className="mb-4 text-xs text-gray-400">
-        Search and date filtering are coming in a future update — not available yet.
-      </p>
+      <HistoryFilters values={filters} onChange={handleFilterChange} onClear={handleClear} />
 
       {loading && (
         <div className="space-y-2" data-testid="history-loading">
@@ -117,15 +135,18 @@ export default function HistoryList({ onSelectRun }: { onSelectRun: (runId: stri
       {!loading && error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error}{' '}
-          <button className="ml-2 underline" onClick={() => load(offset)}>
+          <button className="ml-2 underline" onClick={retry}>
             Retry
           </button>
         </div>
       )}
 
       {!loading && !error && runs.length === 0 && (
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-          No past runs yet. Ask a question on the Analyze screen to get started.
+        <div
+          className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-500"
+          data-testid="history-empty"
+        >
+          {emptyMessage}
         </div>
       )}
 
@@ -164,7 +185,7 @@ export default function HistoryList({ onSelectRun }: { onSelectRun: (runId: stri
           <button
             type="button"
             disabled={offset === 0}
-            onClick={() => load(Math.max(0, offset - PAGE_SIZE))}
+            onClick={() => setOffset(o => Math.max(0, o - PAGE_SIZE))}
             className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Previous
@@ -172,7 +193,7 @@ export default function HistoryList({ onSelectRun }: { onSelectRun: (runId: stri
           <button
             type="button"
             disabled={!hasMore}
-            onClick={() => load(offset + PAGE_SIZE)}
+            onClick={() => setOffset(o => o + PAGE_SIZE)}
             className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Next

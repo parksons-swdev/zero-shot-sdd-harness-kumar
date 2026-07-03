@@ -7,6 +7,7 @@ import ChatThread from '@/components/ChatThread'
 import ChatInput from '@/components/ChatInput'
 import { ChatTurn } from '@/components/ChatMessage'
 import { ApiError, DatasetParsed, getMessages, getRun, postMessage, RunResult } from '@/lib/api'
+import { RESELECT_STORAGE_KEY } from '@/components/DatasetPicker'
 
 const POLL_INTERVAL_MS = 750
 
@@ -61,6 +62,62 @@ export default function Home() {
   )
 
   useEffect(() => stopPolling, [stopPolling])
+
+  // Reselect flow (Phase 2 "Recent Datasets"): when the user reopens a dataset
+  // from /datasets, its profile + freshly-created session_id are handed over via
+  // sessionStorage. Hydrate straight into the chat workspace, skipping the
+  // upload/profile screens, and load any prior conversation for the new session.
+  useEffect(() => {
+    let raw: string | null = null
+    try {
+      raw = sessionStorage.getItem(RESELECT_STORAGE_KEY)
+    } catch {
+      raw = null
+    }
+    if (!raw) return
+    try {
+      sessionStorage.removeItem(RESELECT_STORAGE_KEY)
+    } catch {
+      // ignore
+    }
+    let reselected: DatasetParsed | null = null
+    try {
+      reselected = JSON.parse(raw) as DatasetParsed
+    } catch {
+      reselected = null
+    }
+    if (!reselected || !reselected.session_id) return
+
+    setDataset(reselected)
+    setShowProfile(false)
+    ;(async () => {
+      try {
+        const history = await getMessages(reselected.session_id)
+        const historyTurns: ChatTurn[] = []
+        for (const m of history) {
+          if (m.role === 'user') {
+            historyTurns.push({ id: `msg-${m.created_at}-${m.content}`, role: 'user', createdAt: m.created_at, content: m.content })
+          } else if (m.run_id) {
+            try {
+              const run = await getRun(m.run_id)
+              historyTurns.push({ id: `run-${m.run_id}`, role: 'assistant', createdAt: m.created_at, run })
+            } catch {
+              historyTurns.push({
+                id: `run-${m.run_id}`,
+                role: 'assistant',
+                createdAt: m.created_at,
+                run: { run_id: m.run_id, status: 'completed', answer_text: m.content },
+              })
+            }
+          }
+        }
+        setTurns(historyTurns)
+      } catch {
+        // Fresh session (no prior history) or backend unreachable — start empty.
+        setTurns([])
+      }
+    })()
+  }, [])
 
   const handleParsed = useCallback((parsed: DatasetParsed) => {
     setDataset(parsed)

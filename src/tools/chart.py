@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from tools.sandbox import json_safe_key
+
 MAX_TABLE_ROWS = 500
 
 
@@ -17,11 +19,11 @@ def _records_from_value(value) -> list[dict] | None:
     if isinstance(value, pd.DataFrame):
         return value.head(MAX_TABLE_ROWS).to_dict(orient="records")
     if isinstance(value, pd.Series):
-        return [{"key": k, "value": v} for k, v in value.head(MAX_TABLE_ROWS).items()]
+        return [{"key": json_safe_key(k), "value": v} for k, v in value.head(MAX_TABLE_ROWS).items()]
     if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
         return value[:MAX_TABLE_ROWS]
     if isinstance(value, dict) and value and all(not isinstance(v, (dict, list)) for v in value.values()):
-        return [{"key": k, "value": v} for k, v in value.items()]
+        return [{"key": json_safe_key(k), "value": v} for k, v in value.items()]
     return None
 
 
@@ -51,7 +53,7 @@ def _first_tabular_value(full_result: dict | None) -> tuple[str | None, list[dic
         return None, None
 
     if len(full_result) > 1 and all(not _is_container(v) for v in full_result.values()):
-        return None, [{"key": k, "value": v} for k, v in full_result.items()][:MAX_TABLE_ROWS]
+        return None, [{"key": json_safe_key(k), "value": v} for k, v in full_result.items()][:MAX_TABLE_ROWS]
 
     for key, value in full_result.items():
         records = _records_from_value(value)
@@ -106,6 +108,9 @@ def build_chart_spec(execution_full_result: dict | None) -> dict:
 
     return {
         "type": "bar",
-        "x": [record[label_field] for record in records],
+        # `json_safe_key` also serves to coerce a non-primitive x label (e.g. a
+        # Period/Timestamp coming from a DataFrame-records path) to a
+        # JSON-serializable value so the stored chart_spec never crashes.
+        "x": [json_safe_key(record[label_field]) for record in records],
         "y": [record[value_field] for record in records],
     }

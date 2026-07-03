@@ -5,6 +5,8 @@ directly assert that no raw cell value from the DataFrame ever survives
 `sanitize_result`, independent of any LLM call.
 """
 
+import time
+
 import pandas as pd
 import pytest
 
@@ -180,3 +182,40 @@ def test_run_user_code_no_data_loaded():
     code = "def analyze(df):\n    return {}\n"
     outcome = run_user_code(code, None)
     assert outcome["error"] is not None
+
+
+def test_run_user_code_processes_the_full_frame_not_a_sample():
+    """The Phase 2 correctness invariant: the sandbox runs `analyze` over the
+    ENTIRE in-memory DataFrame. An aggregate over the full frame must differ
+    from the same aggregate over a 1,000-row sample -- proving no sampling is
+    silently applied inside the sandbox."""
+    import numpy as np
+
+    n = 300_000
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"region": rng.choice(["N", "S"], size=n), "amount": rng.uniform(0, 100, n)})
+
+    code = (
+        "def analyze(df):\n"
+        "    return {'total': float(df['amount'].sum())}\n"
+    )
+    start = time.monotonic()
+    outcome = run_user_code(df=df, code=code)
+    elapsed = time.monotonic() - start
+
+    assert outcome["error"] is None
+    full_total = outcome["full_result"]["total"]
+    sample_total = float(df.head(1000)["amount"].sum())
+
+    assert full_total != sample_total
+    assert abs(full_total - float(df["amount"].sum())) < 1e-3
+    # No pathological wrapping overhead on a large frame.
+    assert elapsed < 10.0
+
+
+def test_default_timeout_protects_the_30s_budget():
+    from tools.sandbox import DEFAULT_TIMEOUT_SECONDS
+
+    # A wall-clock ceiling below 30s so the sandbox can never blow the
+    # end-to-end latency budget.
+    assert DEFAULT_TIMEOUT_SECONDS <= 25.0

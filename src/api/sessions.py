@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session as OrmSession
 
 from api._common import api_error, ok
-from db.models import Message, Run
+from db.models import Dataset, Message, Run
 from db.models import Session as SessionModel
 from db.session import get_session
 from graph.runner import start_run
@@ -24,6 +24,31 @@ _ACTIVE_RUN_STATUSES = ("pending", "running")
 
 class MessageRequest(BaseModel):
     content: str = ""
+
+
+class SessionRequest(BaseModel):
+    dataset_id: str
+
+
+@router.post("/sessions")
+def create_session(
+    req: SessionRequest, session: OrmSession = Depends(get_session)
+) -> dict:
+    """Start a new session against an already-profiled dataset (reselect flow).
+
+    Requires the dataset to exist and be `parsed` — an unparsed dataset has
+    no usable profile to back a conversation (spec/api.md Phase 2).
+    """
+    dataset = session.get(Dataset, req.dataset_id)
+    if dataset is None or dataset.status != "parsed":
+        raise api_error(
+            "NOT_FOUND", f"Dataset {req.dataset_id} not found or not parsed.", 404
+        )
+
+    new_session = SessionModel(dataset_id=dataset.id)
+    session.add(new_session)
+    session.flush()
+    return ok({"session_id": new_session.id, "dataset_id": dataset.id})
 
 
 @router.post("/sessions/{session_id}/messages")

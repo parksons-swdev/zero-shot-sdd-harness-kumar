@@ -42,6 +42,18 @@ class Settings(BaseSettings):
     upload_dir: str = Field(default="./data/uploads")
     max_upload_mb: int = Field(default=100)
 
+    # LLM call resilience (analysis-graph-hardening slice; spec/agent.md
+    # "Fallback behaviour"). Every Gemini call goes through src/llm/client.py,
+    # which enforces a per-call wall-clock timeout and retries ONLY transient
+    # failures (timeout / 5xx / network) with exponential backoff. A 429
+    # RESOURCE_EXHAUSTED quota error (or an auth/permission error) is NEVER
+    # retried — it fails fast with an actionable message so we don't
+    # retry-storm a quota that is already zero. Defaults keep the worst-case
+    # total retry time comfortably within the run's 30s budget.
+    llm_timeout_seconds: float = Field(default=20.0)   # per-call wall clock
+    llm_max_retries: int = Field(default=2)            # transient-only retries
+    llm_backoff_base_seconds: float = Field(default=0.5)  # 0.5s, 1.0s, ...
+
 
 _settings: Settings | None = None
 

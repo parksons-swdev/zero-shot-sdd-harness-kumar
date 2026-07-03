@@ -154,6 +154,33 @@ export async function getDataset(datasetId: string): Promise<DatasetParsed> {
   return request<DatasetParsed>(`/datasets/${datasetId}`)
 }
 
+export interface DatasetSummary {
+  dataset_id: string
+  filename: string
+  row_count: number
+  created_at: string
+}
+
+// GET /datasets — recently uploaded datasets, newest first (Phase 2 reselect flow).
+export async function listDatasets(): Promise<DatasetSummary[]> {
+  return request<DatasetSummary[]>('/datasets')
+}
+
+export interface SessionStartResult {
+  session_id: string
+  dataset_id: string
+}
+
+// POST /sessions — start a fresh session against an already-profiled dataset,
+// skipping re-upload / re-profiling.
+export async function createSession(datasetId: string): Promise<SessionStartResult> {
+  return request<SessionStartResult>('/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataset_id: datasetId }),
+  })
+}
+
 export async function postMessage(sessionId: string, content: string): Promise<RunStartResult> {
   return request<RunStartResult>(`/sessions/${sessionId}/messages`, {
     method: 'POST',
@@ -170,6 +197,22 @@ export async function getRun(runId: string): Promise<RunResult> {
   return request<RunResult>(`/runs/${runId}`)
 }
 
-export async function listRuns(limit = 20, offset = 0): Promise<RunSummary[]> {
-  return request<RunSummary[]>(`/runs?limit=${limit}&offset=${offset}`)
+export interface ListRunsFilters {
+  q?: string
+  date_from?: string
+  date_to?: string
+}
+
+export async function listRuns(
+  limit = 20,
+  offset = 0,
+  filters: ListRunsFilters = {},
+): Promise<RunSummary[]> {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  params.set('offset', String(offset))
+  if (filters.q && filters.q.trim()) params.set('q', filters.q.trim())
+  if (filters.date_from) params.set('date_from', filters.date_from)
+  if (filters.date_to) params.set('date_to', filters.date_to)
+  return request<RunSummary[]>(`/runs?${params.toString()}`)
 }
